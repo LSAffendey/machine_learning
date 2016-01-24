@@ -1,0 +1,152 @@
+---
+title: "Pactical Machine Learning Project"
+output: html_document
+---
+#Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The goal of this project is to predict the manner in which they did the exercise by building a machine learning algorithm. This is the "classe" variable in the training set.  
+
+# Data Preparation
+
+The following libraries shall be used for this task:
+```{r}
+library(caret)
+library(rattle)
+library(rpart)
+
+```
+
+For reproducibility we shall set the seed for the experiment.
+```{r}
+
+set.seed(9876)
+```
+
+The training data for this project are available here:
+```{r}
+pml.training <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+```
+
+The test data are available here: 
+```{r}
+pml.testing <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+```
+
+Read the training and testing data and specify the NA strings
+```{r}
+training <- read.csv(url(pml.training), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(pml.testing), na.strings=c("NA","#DIV/0!",""))
+```
+
+# Partition Data
+
+Partition the training data into 60:40 ratios
+```{r}
+inTrain <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+
+theTraining <- training[inTrain, ] 
+dim(theTraining)
+
+theTesting <- training[-inTrain, ]
+dim(theTesting)
+```
+
+# Clean Data
+
+We need to reduce the number of features by removing variables with nearly zero variance, the first ID column which is not useful for prediction, as well as variables that are almost always NA.
+
+Firstly, clean the partitioned training data.
+
+```{r}
+## remove near zero variables
+nzv <- nearZeroVar(theTraining)
+theTraining <- theTraining[, -nzv]
+
+## exclude the first ID column from the training
+theTraining<- theTraining[c(-1)] 
+
+## remove variables containing mostly NAs (90%)
+theNAs <- sapply(theTraining, function(x) mean(is.na(x))) > 0.90  
+theTraining <- theTraining[, theNAs==F]
+```
+
+Secondly, clean the partitioned testing data
+
+```{r}
+## remove near zero variables
+nzv <- nearZeroVar(theTesting)
+theTesting <- theTesting[, -nzv]
+
+## exclude the ID column from the testing
+theTesting<- theTesting[c(-1)] 
+
+## remove variables containing mostly NAs (90%)
+theNAs <- sapply(theTesting, function(x) mean(is.na(x))) > 0.90  
+theTesting <- theTesting[, theNAs==F]
+```
+
+Make sure the data are of the same types
+```{r}
+## coerce data into same data type 
+for (i in 1:length(theTesting) ) {
+        for(j in 1:length(theTraining)) {
+                if( length( grep(names(theTraining[i]), names(theTesting)[j]) ) ==1)  {
+                        class(theTesting[j]) <- class(theTraining[i])
+                }      
+        }      
+}
+
+```
+
+# Modeling and Prediction
+
+We shall try 2 machine learning algorithms, namely the classification tree and random forests, and then choose the one that gives a better accuracy.
+
+Model using classification tree and then predict:
+```{r}
+## train data and create model using rpart, then print fancy plot
+modelFit <- train(classe ~ ., method="rpart", data=theTraining)
+print(modelFit$finalModel)
+fancyRpartPlot(modelFit$finalModel)
+
+## perform prediction and show confusion matrix 
+prediction1 <- predict(modelFit, theTesting, type = "raw")
+confusionMatrix(prediction1, theTesting$classe)
+
+```
+
+The accuracy is only 49% and the split is not balanced.  Therefore we need to try another algorithm.
+
+Model using random forests with 10 cross validation and then predict:
+```{r}
+## 10 cross validation to train data and create model using random forest
+fitControl <- trainControl(method="cv", number=10, verboseIter=F)
+fit <- train(classe ~ ., method ="rf", trControl=fitControl, data=theTraining)
+print(fit$finalModel)
+
+## perform prediction and show confusion matrix 
+prediction2 <- predict(fit, theTesting, type = "raw")
+confusionMatrix(prediction2, theTesting$classe)
+```
+
+The accuracy is 99.89%, thus the out-of-sample error is 0.08%.
+Since randomForest gives better accuracy, write the output of the 20 test cases to files.
+
+# Validation
+
+```{r}
+
+thePrediction <- predict(fit, testing, type = "raw")
+
+pml_write_files = function(x){
+        n = length(x)
+        for(i in 1:n){
+                filename = paste0("test_",i,".txt")
+                write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+        }
+}
+
+pml_write_files(thePrediction)
+```
